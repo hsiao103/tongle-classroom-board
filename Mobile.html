@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<base target="_top">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>班級大屏・手機版</title>
+<style>
+:root{--bg:#0e3a45;--card:#fff;--ink:#12303a;--mut:#5b7780;--gold:#ffc145;--coral:#ff7a59;--line:#d6e2e5}
+*{box-sizing:border-box;margin:0;padding:0}
+html{-webkit-text-size-adjust:100%}
+body{font-family:"Noto Sans TC","PingFang TC","Microsoft JhengHei",system-ui,sans-serif;background:var(--bg);color:var(--ink);min-height:100vh;padding-bottom:40px}
+header{position:sticky;top:0;z-index:5;background:#0a2a33;color:#fff;padding:10px 12px;display:flex;flex-direction:column;gap:8px}
+header .row{display:flex;align-items:center;gap:8px;justify-content:space-between}
+h1{font-size:17px}
+.st{font-size:12px;opacity:.85}
+.tabs{display:flex;gap:6px}
+.tabs button{flex:1;padding:9px 4px;border:0;border-radius:10px;background:#1d4b57;color:#fff;font:inherit;font-weight:700}
+.tabs button.on{background:var(--gold);color:#2a2100}
+button.ic{background:#1d4b57;color:#fff;border:0;border-radius:9px;padding:7px 11px;font:inherit}
+main{padding:12px;display:flex;flex-direction:column;gap:12px;max-width:680px;margin:0 auto}
+.card{background:var(--card);border-radius:14px;padding:12px 12px 10px;box-shadow:0 2px 10px rgba(0,0,0,.2)}
+.card h2{font-size:15px;display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin-bottom:6px}
+.card h2 small{font-size:11px;color:var(--mut);font-weight:500}
+textarea,input[type=password],input[type=text],select{width:100%;border:1px solid var(--line);border-radius:10px;padding:9px 10px;font:inherit;font-size:16px;background:#fafcfc;color:var(--ink)}
+textarea{min-height:5.5em;line-height:1.5;resize:vertical}
+.hint{font-size:12px;color:var(--mut);margin-top:5px;line-height:1.5}
+.bar{display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap}
+.btn{border:0;border-radius:10px;padding:9px 16px;font:inherit;font-weight:700;background:var(--coral);color:#fff}
+.btn.alt{background:#e4eef0;color:var(--ink)}
+.btn:disabled{opacity:.5}
+.ok{color:#1b8a4b;font-size:12px}.bad{color:#c0392b;font-size:12px}
+.chk{list-style:none;display:flex;flex-direction:column;gap:2px;margin-bottom:6px}
+.chk li{display:flex;gap:10px;align-items:flex-start;padding:9px 6px;border-radius:8px;font-size:16px;line-height:1.4}
+.chk li.hd{font-weight:800;border-bottom:2px solid var(--line);margin-top:4px}
+.chk li.done span{text-decoration:line-through;opacity:.5}
+.chk input{width:22px;height:22px;flex:none;margin-top:1px}
+.ev{list-style:none;font-size:15px;line-height:1.7}
+.ev b{display:inline-block;min-width:5.6em;color:var(--mut);font-weight:600}
+.gate{background:var(--card);border-radius:14px;padding:16px;margin:16px 12px}
+.gate h2{margin-bottom:8px}
+.empty{color:var(--mut);font-size:14px;padding:6px 2px}
+details summary{cursor:pointer;font-size:14px;color:var(--mut);padding:4px 0}
+</style>
+</head>
+<body>
+<header>
+  <div class="row"><h1>班級大屏・手機版</h1><span class="st" id="st"></span></div>
+  <div class="tabs" id="tabs" hidden></div>
+</header>
+<div class="gate" id="gate" hidden>
+  <h2>輸入存取代碼</h2>
+  <input type="password" id="tok" autocomplete="off" placeholder="與 Apps Script 的 TOKEN 相同">
+  <div class="bar"><button class="btn" id="tokOk">進入</button><span class="bad" id="tokErr"></span></div>
+  <p class="hint">代碼只會存在這支手機的瀏覽器裡。</p>
+</div>
+<main id="main" hidden></main>
+
+<script>
+(function(){
+"use strict";
+var $=function(i){return document.getElementById(i)};
+function mk(t,c,x){var e=document.createElement(t);if(c)e.className=c;if(x!=null)e.textContent=x;return e}
+var MODES=[["admin","行政"],["teach","教學"],["train","研習"]];
+var TYPE_LABEL={text:"文字",checklist:"清單",rich:"自訂內容",links:"常用連結",countdown:"倒數日",timetable:"課表",proj:"專案追蹤"};
+var HINTS={
+  links:"每行：名稱 | 網址。本機路徑（如 D:\\資料夾）只在大屏電腦上能開啟。行首 # 可暫時隱藏。",
+  countdown:"每行：名稱 | 日期（如 12/10 或 2026-12-10）。",
+  timetable:"每行一節：時間 | 週一 | 週二 | 週三 | 週四 | 週五（時間例如 08:40-09:20）。",
+  proj:"每行一個專案：專案名稱 | 連結（標籤@網址，可多個用空白分開）| 提醒 | 到期日。行首 # 可暫時隱藏。",
+  rich:"支援 # 標題、- 清單、**粗體**、[文字](網址)。",
+  checklist:"每行一項；行首 ## 是小標題。"
+};
+var run=(window.google&&window.google.script&&window.google.script.run)||null;
+var ls=(function(){try{var k="__t";localStorage.setItem(k,"1");localStorage.removeItem(k);return localStorage}catch(e){var m={};return {getItem:function(k){return m[k]==null?null:m[k]},setItem:function(k,v){m[k]=String(v)},removeItem:function(k){delete m[k]}}}})();
+var token=ls.getItem("cbm.token")||"",mode=ls.getItem("cbm.mode")||"teach",rows={},manifest=[],todayData=null,skew=0,dirty={},timer=0;
+
+function call(fn,args){
+  return new Promise(function(res,rej){
+    if(!run){rej(new Error("請從 Apps Script 網址開啟本頁"));return}
+    run.withSuccessHandler(res).withFailureHandler(function(e){rej(new Error(e&&e.message||"連線失敗"))})[fn].apply(run,args);
+  });
+}
+function nowT(){return Date.now()+skew}
+function tpe(){var d=new Date(Date.now()+(8*60+new Date().getTimezoneOffset())*60000),p=function(n){return(n<10?"0":"")+n};return d.getFullYear()+"-"+p(d.getMonth()+1)+"-"+p(d.getDate())}
+function textKey(m,f){return "text."+(m==="teach"?"":m+".")+tpe()+"."+f}
+function val(k){var r=rows[k];return r&&!r.del?r.v:null}
+function status(t,bad){var e=$("st");e.textContent=t;e.style.color=bad?"#ffb4a6":""}
+
+function load(quiet){
+  return call("mGet",[token]).then(function(j){
+    if(j.error){if(j.error==="unauthorized"){ls.removeItem("cbm.token");token="";showGate("代碼不正確");return}throw new Error(j.error)}
+    if(j.now)skew=j.now-Date.now();
+    var nr={};(j.rows||[]).forEach(function(r){nr[r.k]=r});rows=nr;todayData=j.today||null;
+    try{manifest=JSON.parse(val("manifest")||"[]")}catch(e){manifest=[]}
+    var n=new Date();status("已更新 "+("0"+n.getHours()).slice(-2)+":"+("0"+n.getMinutes()).slice(-2));
+    render();
+  }).catch(function(e){status("連線失敗："+e.message,true)});
+}
+function save(items,done){
+  items.forEach(function(it){it.t=nowT()});
+  call("mSet",[token,items]).then(function(j){
+    if(j&&j.error)throw new Error(j.error);
+    items.forEach(function(it){rows[it.k]={k:it.k,v:it.v||"",t:it.t,del:!!it.del}});
+    done(true);
+  }).catch(function(e){done(false,e.message)});
+}
+function showGate(msg){$("gate").hidden=false;$("main").hidden=true;$("tabs").hidden=true;$("tokErr").textContent=msg||""}
+function tabs(){
+  var t=$("tabs");t.textContent="";t.hidden=false;
+  MODES.forEach(function(m){var b=mk("button",m[0]===mode?"on":"",m[1]);b.addEventListener("click",function(){mode=m[0];ls.setItem("cbm.mode",mode);dirty={};tabs();render()});t.appendChild(b)});
+}
+function eventsCard(){
+  var c=mk("section","card");c.appendChild(mk("h2",null,"今日行程"));
+  var ev=(todayData&&todayData.events)||[];
+  if(!ev.length){c.appendChild(mk("div","empty","今日沒有行程（或尚未設定行事曆）"));return c}
+  var ul=mk("ul","ev");
+  ev.slice().sort(function(a,b){return a.start-b.start}).forEach(function(e){
+    var li=mk("li"),p=function(n){return(n<10?"0":"")+n},s=new Date(e.start),en=new Date(e.end);
+    li.appendChild(mk("b",null,e.allDay?"全天":p(s.getHours())+":"+p(s.getMinutes())+"–"+p(en.getHours())+":"+p(en.getMinutes())));
+    li.appendChild(document.createTextNode(e.title+(e.location?"（"+e.location+"）":"")));ul.appendChild(li);
+  });
+  c.appendChild(ul);return c;
+}
+function keyOf(w){
+  if(w.t==="text")return w.f?textKey(mode,w.f):"note."+w.id;
+  return ({checklist:"cl",rich:"rt",links:"lk",countdown:"cd",timetable:"tt",proj:"proj"})[w.t]+"."+w.id;
+}
+function card(w){
+  var k=keyOf(w),c=mk("section","card"),h=mk("h2",null,w.n||TYPE_LABEL[w.t]),sm=mk("small",null,w.t==="text"&&w.f?"今日":TYPE_LABEL[w.t]);h.appendChild(sm);c.appendChild(h);
+  var cur=val(k),msg=mk("span","ok"),json=(w.t==="checklist"||w.t==="rich");
+  var obj=null;if(json){try{obj=JSON.parse(cur||"null")}catch(e){}if(!obj||typeof obj!=="object")obj=w.t==="checklist"?{t:"",m:"check",d:{}}:{t:"",fit:"1",fs:100,al:"left"}}
+  var initial=json?obj.t:(cur!=null?cur:((w.t==="text"&&w.f&&todayData&&mode==="teach"&&todayData[w.f])||""));
+  var ta=mk("textarea");ta.value=initial;ta.spellcheck=false;
+  var list=null;
+  function paint(){
+    if(!list)return;list.textContent="";var n=0;
+    obj.t.split(/\r?\n/).forEach(function(l){l=l.replace(/\s+$/,"");if(!l.trim())return;
+      var li=mk("li");if(/^##\s*/.test(l)){li.className="hd";li.textContent=l.replace(/^##\s*/,"");list.appendChild(li);return}
+      n++;var tx=l.trim();
+      if(obj.m==="check"){var cb=mk("input");cb.type="checkbox";cb.checked=!!(obj.d&&obj.d[tx]);if(cb.checked)li.className="done";
+        cb.addEventListener("change",function(){obj.d=obj.d||{};if(cb.checked)obj.d[tx]=1;else delete obj.d[tx];
+          save([{k:k,v:JSON.stringify(obj)}],function(ok,e){msg.className=ok?"ok":"bad";msg.textContent=ok?"已儲存":"失敗："+e});paint()});li.appendChild(cb)}
+      else li.appendChild(mk("b",null,obj.m==="num"?n+".":"•"));
+      li.appendChild(mk("span",null,tx));list.appendChild(li)});
+    if(!n)list.appendChild(mk("div","empty","還沒有項目"));
+  }
+  var ed=c;
+  if(w.t==="checklist"){list=mk("ul","chk");c.appendChild(list);paint();ed=mk("details");ed.appendChild(mk("summary",null,"編輯項目"));c.appendChild(ed)}
+  ed.appendChild(ta);
+  var sel=null;
+  if(w.t==="checklist"){sel=mk("select");[["check","可勾選"],["num","編號"],["dot","圓點"]].forEach(function(o){var op=mk("option",null,o[1]);op.value=o[0];sel.appendChild(op)});sel.value=obj.m||"check";sel.style.marginTop="8px";ed.appendChild(sel)}
+  if(HINTS[w.t])ed.appendChild(mk("div","hint",HINTS[w.t]));
+  var bar=mk("div","bar"),btn=mk("button","btn","儲存");
+  bar.appendChild(btn);bar.appendChild(msg);ed.appendChild(bar);
+  ta.addEventListener("input",function(){dirty[k]=1;msg.className="";msg.textContent=""});
+  btn.addEventListener("click",function(){
+    var v;
+    if(json){obj.t=ta.value;if(sel)obj.m=sel.value;
+      if(w.t==="rich"){obj.fit=obj.fit||"1";obj.fs=obj.fs||100;obj.al=obj.al||"left"}
+      v=JSON.stringify(obj)}
+    else v=ta.value.replace(/\s+$/,"");
+    btn.disabled=true;msg.className="";msg.textContent="儲存中…";
+    save([{k:k,v:v,del:(!json&&v==="")}],function(ok,e){btn.disabled=false;if(ok){delete dirty[k];msg.className="ok";msg.textContent="已儲存，大屏約 30 秒內更新";paint()}else{msg.className="bad";msg.textContent="失敗："+e}});
+  });
+  return c;
+}
+function render(){
+  if(Object.keys(dirty).length)return;   // 正在編輯時不重畫，避免洗掉輸入
+  $("gate").hidden=true;var m=$("main");m.hidden=false;m.textContent="";tabs();
+  m.appendChild(eventsCard());
+  var ws=manifest.filter(function(w){return w.m===mode});
+  if(!ws.length){m.appendChild(mk("div","card empty","大屏尚未同步這個情境的區塊。請先在大屏的「設定」填入同一個網址與代碼，並切換到此情境開啟一次。"));return}
+  ws.forEach(function(w){m.appendChild(card(w))});
+}
+$("tokOk").addEventListener("click",function(){var v=$("tok").value.trim();if(!v){$("tokErr").textContent="請輸入代碼";return}token=v;ls.setItem("cbm.token",v);$("gate").hidden=true;status("連線中…");load()});
+$("tok").addEventListener("keydown",function(e){if(e.key==="Enter")$("tokOk").click()});
+document.addEventListener("visibilitychange",function(){if(document.visibilityState==="visible"&&token)load()});
+if(token){status("連線中…");load()}else showGate("");
+clearInterval(timer);timer=setInterval(function(){if(token&&document.visibilityState==="visible")load()},20000);
+})();
+</script>
+</body>
+</html>

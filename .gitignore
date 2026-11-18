@@ -1,0 +1,8 @@
+*.bak
+*.csv
+*.local
+.env
+clasp.json
+.clasp.json
+備份*
+cb-backup*
