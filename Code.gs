@@ -2,7 +2,7 @@
  * 同樂班級大屏｜資料端點（行事曆＋試算表＋抽籤線上報名）
  *
  * 一次性設定（編輯器左側「專案設定」→「指令碼屬性」新增）：
- *   TOKEN        自訂的存取代碼（請自訂一組長字串），大屏設定頁填同一組
+ *   TOKEN        自訂的存取代碼（例如 tongle-2026），大屏設定頁填同一組
  *   SHEET_ID     試算表網址中 /d/ 與 /edit 之間那一串
  *   CALENDAR_ID  （選填）要顯示的行事曆 ID；不填就用你的預設行事曆
  *
@@ -60,6 +60,10 @@ function doGet(e) {
     if (!tokenOk_(p.token)) return out_({ error: 'unauthorized' });
     try { return out_(hwGet_(String(p.date || ''), String(p.cls == null ? '*' : p.cls))); }
     catch (err) { return out_({ error: String(err.message || err) }); }
+  }
+  if (String(p.action) === 'admin_get') {
+    if (!tokenOk_(p.token)) return out_({ error: 'unauthorized' });
+    try { return out_(adminGet_()); } catch (err) { return out_({ error: String(err.message || err) }); }
   }
   if (String(p.action) === 'sync_get') {
     if (!tokenOk_(p.token)) return out_({ error: 'unauthorized' });
@@ -679,4 +683,97 @@ function joinPage_(room) {
     '</script></main></body></html>'
   ].join('\n').replace(/__ROOM__/g, room);
   return HtmlService.createHtmlOutput(html).setTitle('加入抽籤');
+}
+
+
+/* ==================== 行政看板：公文未辦件數、今日請假（v8） ====================
+ * 讀同一份試算表的兩個分頁（分頁名稱可用指令碼屬性 DOC_TAB、LEAVE_TAB 改）：
+ *   「公文」：承辦單位、承辦人、文號、主旨（可再加一欄「狀態」，填已辦／已批／結案／歸檔等字樣的不計入未辦）
+ *   「差假」：單位、姓名、表單、申請時間（例：起115-11-23(一) 15:00；訖115-11-23(一) 16:00；共計0日1時）
+ * 只回傳「件數」與「請假姓名」：公文主旨、文號、承辦人不會離開試算表；假別（病假、事假…）也不回傳。
+ */
+var ADM_DOC_TAB = '公文';
+var ADM_LEAVE_TAB = '差假';
+var ADM_DONE_RE = /已辦|已批|已核|結案|歸檔|完成|銷號|作廢/;
+var ADM_NOT_LEAVE_RE = /加班|刷卡|補登|忘打|未打|補簽/;
+
+function adminGet_() {
+  var props = PropertiesService.getScriptProperties();
+  var id = props.getProperty('SHEET_ID');
+  if (!id) throw new Error('no-sheet-id');
+  var ss = SpreadsheetApp.openById(id);
+  var today = Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd');
+  return {
+    date: today,
+    docs: adminDocs_(ss.getSheetByName(props.getProperty('DOC_TAB') || ADM_DOC_TAB)),
+    leave: adminLeave_(ss.getSheetByName(props.getProperty('LEAVE_TAB') || ADM_LEAVE_TAB), today)
+  };
+}
+
+function adminCol_(head, names) {
+  for (var i = 0; i < head.length; i++) {
+    var h = String(head[i]).replace(/\s/g, '');
+    for (var k = 0; k < names.length; k++) if (h === names[k]) return i;
+  }
+  return -1;
+}
+
+function adminDocs_(sh) {
+  var r = { pending: 0, byUnit: [], missing: !sh };
+  if (!sh || sh.getLastRow() < 2) return r;
+  var v = sh.getDataRange().getValues();
+  var cNo = adminCol_(v[0], ['文號']), cUnit = adminCol_(v[0], ['承辦單位', '單位']);
+  var cSt = adminCol_(v[0], ['狀態', '辦理狀態', '辦理情形']);
+  if (cNo < 0) cNo = 2;
+  var by = {};
+  for (var i = 1; i < v.length; i++) {
+    if (String(v[i][cNo]).trim() === '') continue;
+    if (cSt >= 0 && ADM_DONE_RE.test(String(v[i][cSt]))) continue;
+    r.pending++;
+    var u = cUnit >= 0 ? String(v[i][cUnit]).trim() || '未填單位' : '未填單位';
+    by[u] = (by[u] || 0) + 1;
+  }
+  r.byUnit = Object.keys(by).map(function (u) { return { u: u, n: by[u] }; })
+    .sort(function (a, b) { return b.n - a.n; });
+  return r;
+}
+
+// 解析「起115-11-23(一) 15:00；訖115-11-23(一) 16:00；共計0日1時」→ {s:'yyyy-MM-dd', e:'yyyy-MM-dd', st:'15:00', et:'16:00', part:true}
+function adminParseRange_(txt) {
+  var m = String(txt).match(/起\s*(\d{2,3})-(\d{1,2})-(\d{1,2})[^\d]*?(\d{1,2}):(\d{2})[\s\S]*?訖\s*(\d{2,3})-(\d{1,2})-(\d{1,2})[^\d]*?(\d{1,2}):(\d{2})/);
+  if (!m) return null;
+  function d(y, mo, da) { return (Number(y) + 1911) + '-' + ('0' + mo).slice(-2) + '-' + ('0' + da).slice(-2); }
+  function t(h, mi) { return ('0' + h).slice(-2) + ':' + mi; }
+  var days = String(txt).match(/共計\s*(\d+)\s*日/);
+  var s = d(m[1], m[2], m[3]), e = d(m[6], m[7], m[8]);
+  return { s: s, e: e, st: t(m[4], m[5]), et: t(m[9], m[10]), part: !!days && Number(days[1]) === 0 && s === e };
+}
+
+function adminLeave_(sh, today) {
+  var r = { total: 0, units: [], missing: !sh };
+  if (!sh || sh.getLastRow() < 2) return r;
+  var v = sh.getDataRange().getValues();
+  var cU = adminCol_(v[0], ['單位']), cN = adminCol_(v[0], ['姓名']);
+  var cF = adminCol_(v[0], ['表單', '假別']), cT = adminCol_(v[0], ['申請時間', '時間']);
+  if (cU < 0) cU = 0; if (cN < 0) cN = 1; if (cF < 0) cF = 2; if (cT < 0) cT = 3;
+  var by = {}, seen = {};
+  for (var i = 1; i < v.length; i++) {
+    var name = String(v[i][cN]).trim();
+    if (!name || ADM_NOT_LEAVE_RE.test(String(v[i][cF]))) continue;
+    var rg = adminParseRange_(v[i][cT]);
+    if (!rg || today < rg.s || today > rg.e) continue;
+    var unit = String(v[i][cU]).replace(/^同樂國小|^宜蘭縣員山鄉同樂國民小學/, '').trim() || '其他';
+    var key = unit + '|' + name + '|' + rg.s + rg.st + rg.e + rg.et;
+    if (seen[key]) continue;
+    seen[key] = 1;
+    (by[unit] = by[unit] || []).push({ n: name, t: rg.part ? rg.st + '–' + rg.et : '' });
+  }
+  var names = {};
+  r.units = Object.keys(by).map(function (u) {
+    var mine = {};
+    by[u].forEach(function (p) { names[p.n] = 1; mine[p.n] = 1; });
+    return { u: u, n: Object.keys(mine).length, people: by[u] };
+  }).sort(function (a, b) { return b.n - a.n; });
+  r.total = Object.keys(names).length;
+  return r;
 }

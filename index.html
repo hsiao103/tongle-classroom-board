@@ -141,6 +141,25 @@ button{font:inherit;color:inherit;cursor:pointer}
 #drawDlg .cnt{float:right;font-weight:500;font-size:13px}
 #drawDlg .warn{color:#b3261e;font-size:13px}
 
+/* ---------- 行政看板：公文未辦／今日請假 ---------- */
+.xa-b{font-size:min(5.2cqh,2.6cqw);gap:.35em;overflow:hidden}
+.xa-big{flex:none;display:flex;align-items:baseline;gap:.25em;line-height:1}
+.xa-big b{font-size:3.2em;font-weight:800;font-variant-numeric:tabular-nums}
+.xa-big span{font-size:1em;font-weight:700;opacity:.8}
+.xa-chips{flex:none;display:flex;flex-wrap:wrap;align-content:flex-start;gap:.3em .4em;overflow:hidden}
+.xa-chip{padding:.15em .55em;border-radius:1em;background:color-mix(in srgb,currentColor 10%,transparent);font-size:.8em;white-space:nowrap}
+.xa-chip b{margin-left:.35em}
+.xa-list{flex:1;min-height:0;display:flex;flex-direction:column;gap:.4em;overflow:hidden}
+.xa-u{flex:none;padding:.3em .55em;border-radius:.6em;background:color-mix(in srgb,currentColor 7%,transparent)}
+.xa-u h4{margin:0;font-size:.9em;font-weight:700}
+.xa-u h4 em{font-style:normal;opacity:.75;margin-left:.4em;font-weight:600}
+.xa-n{margin-top:.1em;font-size:.62em;line-height:1.5;opacity:.9}
+.xa-n i{font-style:normal;white-space:nowrap;margin-right:.7em}
+.xa-n small{opacity:.65;margin-left:.2em;font-size:.9em}
+.xa-st{flex:none;font-size:.55em;opacity:.6}
+.xa-st.bad{opacity:1;color:#b3261e}
+.xa-none{opacity:.7;font-weight:600}
+
 /* ---------- 未繳作業 ---------- */
 .hw-b{font-size:min(5.6cqh,2.8cqw);gap:.5em}
 .hw-sum{flex:none;font-weight:700;opacity:.75}
@@ -2261,6 +2280,8 @@ var CATALOG=[
   {key:"materials",label:"教材",type:"text",field:"materials",single:true,def:{w:21,h:28,bg:CARD.bg,fg:CARD.fg,title:"教材",ph:"點此輸入教材"}},
   {key:"next",label:"完成後",type:"text",field:"next",single:true,def:{w:21,h:28,bg:CARD.bg,fg:CARD.fg,title:"完成後",ph:"點此輸入完成後要做什麼"}},
   {key:"hw",label:"未繳作業",type:"hw",def:{w:36,h:50,bg:CARD.bg,fg:CARD.fg,title:"未繳作業",opt:{cls:"",n:25,pre:false}}},
+  {key:"xdocs",label:"公文未辦",type:"xdocs",def:{w:22,h:34,bg:CARD.bg,fg:CARD.fg,title:"公文未辦"}},
+  {key:"xleave",label:"今日請假",type:"xleave",def:{w:28,h:46,bg:CARD.bg,fg:CARD.fg,title:"今日請假"}},
   {key:"qr",label:"QR Code",type:"qr",def:{w:20,h:36,bg:CARD.bg,fg:CARD.fg,title:"掃描連結"}},
   {key:"countdown",label:"倒數日",type:"countdown",def:{w:24,h:32,bg:CARD.bg,fg:CARD.fg,title:"倒數日"}},
   {key:"stopwatch",label:"碼錶",type:"stopwatch",def:{w:26,h:34,bg:CARD.bg,fg:CARD.fg,title:"碼錶"}},
@@ -2391,7 +2412,7 @@ function syncMsg(m,e){lastSync=[m,e];setSync(m,e)}
 /* ---- 行政情境：直接讀取 TLPS-daily 試算表（需設為「知道連結者可檢視」） ----
    欄位：日曆名稱、標題、開始、結束、備註（可省略）；日期為美式 月/日/年 [時:分:秒]，
    全天活動的結束日為「不含」當天（與 Google 日曆匯出相同）。 */
-var ADM_DEF="";   // 行政行事曆試算表網址：請在大屏「設定」填入（不要寫死在公開程式碼裡）
+var ADM_DEF="";
 var ADM_DAYS=7,admEv=null,admRows=null,ADM_RANGE=lsGet("cb.admrange")==="1"?1:7;
 /* 主旨精簡：先套用自訂規則（設定裡每行「原文=簡稱」，簡稱留空就是刪除），再套用內建規則 */
 function admRulesList(){
@@ -2868,13 +2889,24 @@ TYPES.scoreboard={build:function(b,w){
     if(!noUndo){undo.push({seat:seat,v:v});if(undo.length>30)undo.shift()}
     render();
   }
+  /* 整組加減分：大屏只讓該組分數 ±v（不論人數）；同時在後台把 ±v 記到組內每位成員的個人平時成績。
+     個人這部分不計入大屏的組分數（避免重複計算）。該組沒有成員座號時，只調整組分數。 */
+  function awardTeam(i,v){
+    var s=st(),t=s.teams[i],now=hwNowT();
+    t.adj=(t.adj||0)+v;
+    t.seats.forEach(function(seat){
+      var cur=((s.pd.v[seat]||[0,0])[0])+v;s.pd.v[seat]=[cur,now];
+      if(cfg.url&&Math.abs(cur)<=9999)sbEnq({d:today,c:s.cls,s:seat,g:t.n,p:cur,t:now});
+    });
+    wset("sb",w.id,s);render();
+  }
   function renderView(s){
     row.textContent="";row.style.setProperty("--n",s.teams.length);
     s.teams.forEach(function(t,i){
       var c=mk("div","sb-t");c.style.background=SB_COL[i%SB_COL.length];if(i%SB_COL.length===3)c.style.color="#2a2100";
       c.appendChild(mk("div","sb-n",t.n));c.appendChild(mk("div","sb-s",String(score(s,t))));
       var bs=mk("div","sb-bt");
-      [["－1",-1],["＋1",1],["＋5",5]].forEach(function(x){bs.appendChild(mkb(x[0],"btn alt",function(){var s2=st();s2.teams[i].adj=(s2.teams[i].adj||0)+x[1];wset("sb",w.id,s2);render()}))});
+      [["－1",-1],["＋1",1],["＋5",5]].forEach(function(x){bs.appendChild(mkb(x[0],"btn alt",function(){awardTeam(i,x[1])}))});
       c.appendChild(bs);row.appendChild(c);
     });
   }
@@ -2968,7 +3000,7 @@ TYPES.scoreboard={build:function(b,w){
         if(r.d!==today||r.c!==s.cls)return;
         var q=sbQ[r.d+"|"+r.c+"|"+r.s];if(q&&q.t>=r.t)return;
         var loc=s.pd.v[r.s];
-        if(!loc||r.t>loc[1]){var delta=r.p-(loc?loc[0]:0);if(delta){s.ps[r.s]=(s.ps[r.s]||0)+delta;ch=true}s.pd.v[r.s]=[r.p,r.t]}
+        if(!loc||r.t>loc[1]){s.pd.v[r.s]=[r.p,r.t];ch=true}   // 只校正個人當天累計（寫入用）；不動大屏上的組分數
       });
       if(ch){wset("sb",w.id,s);if(mode==="view")render()}
     }).catch(function(){});
@@ -3959,6 +3991,71 @@ function openHwSet(w,done){
   };
   d.showModal();
 }
+
+/* ---- 行政看板：公文未辦件數、今日請假（資料來自試算表「公文」「差假」分頁，只取件數與姓名） ---- */
+var xaData=null,xaErr="",xaT=0,xaSubs=[],xaBusy=false;
+try{var xaS=JSON.parse(lsGet("cb.xa")||"null");if(xaS&&xaS.d){xaData=xaS.d;xaT=xaS.t||0}}catch(e){}
+function xaPull(){
+  if(!cfg.url){xaErr="請先在「設定」填入雲端網址與 TOKEN";xaNotify();return}
+  if(xaBusy)return;xaBusy=true;
+  var u=cfg.url+(cfg.url.indexOf("?")>-1?"&":"?")+"action=admin_get&token="+encodeURIComponent(cfg.token)+"&t="+Date.now();
+  fetch(u,{cache:"no-store"}).then(function(r){return r.json()}).then(function(j){
+    xaBusy=false;
+    if(j.error)throw new Error(j.error==="unauthorized"?"TOKEN 不符":j.error);
+    xaData=j;xaT=Date.now();xaErr="";lsSet("cb.xa",JSON.stringify({d:j,t:xaT}));xaNotify();
+  }).catch(function(e){xaBusy=false;xaErr="取得失敗（"+(e&&e.message||"網路")+"）";xaNotify()});
+}
+function xaNotify(){xaSubs=xaSubs.filter(function(f){return f.alive()});xaSubs.forEach(function(f){f.fn()})}
+function xaStamp(el){
+  var t=xaT?new Date(xaT):null,hm=t?("0"+t.getHours()).slice(-2)+":"+("0"+t.getMinutes()).slice(-2):"";
+  el.textContent=xaErr?xaErr+(hm?"；顯示 "+hm+" 的資料":""):(hm?"更新 "+hm:"讀取中…");
+  el.classList.toggle("bad",!!xaErr);
+}
+function xaStale(){/* 資料若不是今天的，請假名單不可信，視為過期 */
+  if(!xaData||!xaData.date)return false;var n=new Date();
+  return xaData.date!==n.getFullYear()+"-"+("0"+(n.getMonth()+1)).slice(-2)+"-"+("0"+n.getDate()).slice(-2);
+}
+function xaWidget(b,w,draw){
+  b.classList.add("xa-b");var body=mk("div","xa-list"),st=mk("div","xa-st");b.appendChild(body);b.appendChild(st);
+  var alive=true;
+  function render(){
+    body.textContent="";xaStamp(st);
+    if(!xaData){body.appendChild(mk("div","xa-none",xaErr||"讀取中…"));return}
+    draw(body);fit();
+  }
+  function fit(){body.style.fontSize="";fitBox(body,8,clamp(Math.min(body.clientWidth*.075,body.clientHeight*.16),14,34))}
+  xaSubs.push({fn:render,alive:function(){return alive&&b.isConnected!==false}});
+  render();if(!xaT||Date.now()-xaT>60000||xaStale())xaPull();
+  return {render:render,fit:fit,destroy:function(){alive=false}};
+}
+TYPES.xdocs={build:function(b,w){
+  return xaWidget(b,w,function(body){
+    var d=xaData.docs||{};body.className="xa-list";
+    if(d.missing){body.appendChild(mk("div","xa-none","試算表找不到「公文」分頁"));return}
+    var big=mk("div","xa-big"),n=mk("b",null,String(d.pending||0));big.appendChild(n);big.appendChild(mk("span",null,"件未辦理"));
+    body.appendChild(big);
+    var chips=mk("div","xa-chips");
+    (d.byUnit||[]).forEach(function(u){var c=mk("span","xa-chip",u.u);c.appendChild(mk("b",null,String(u.n)));chips.appendChild(c)});
+    body.appendChild(chips);
+  });
+}};
+TYPES.xleave={build:function(b,w){
+  return xaWidget(b,w,function(body){
+    var l=xaData.leave||{};
+    if(l.missing){body.appendChild(mk("div","xa-none","試算表找不到「差假」分頁"));return}
+    if(xaStale()){body.appendChild(mk("div","xa-none","資料不是今天的，等待更新…"));return}
+    var big=mk("div","xa-big");big.appendChild(mk("b",null,String(l.total||0)));big.appendChild(mk("span",null,"人請假"));
+    body.appendChild(big);
+    if(!(l.units||[]).length){body.appendChild(mk("div","xa-none","今天全員到校"));return}
+    l.units.forEach(function(u){
+      var box=mk("div","xa-u"),h=mk("h4",null,u.u);h.appendChild(mk("em",null,u.n+" 人"));box.appendChild(h);
+      var nm=mk("div","xa-n");
+      u.people.forEach(function(p){var i=mk("i",null,p.n);if(p.t)i.appendChild(mk("small",null,p.t));nm.appendChild(i)});
+      box.appendChild(nm);body.appendChild(box);
+    });
+  });
+}};
+setInterval(function(){if(xaSubs.length)xaPull()},5*60*1000);
 
 TYPES.hw={build:function(b,w){
   b.classList.add("hw-b");
